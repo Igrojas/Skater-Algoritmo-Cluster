@@ -59,6 +59,7 @@ print("="*70)
 # Cargar el Excel
 df = pd.read_excel(archivo_excel, sheet_name=hoja)
 
+
 print(f"\n✓ Archivo cargado: {len(df)} filas")
 print(f"  Columnas disponibles: {df.columns.tolist()}")
 

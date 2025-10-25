@@ -136,6 +136,7 @@ def load_data():
         df.columns = ['x', 'y', 'z', 'variable']
         df = df.dropna()
         
+        
         return df
     except Exception as e:
         st.error(f"Error al cargar datos: {e}")
