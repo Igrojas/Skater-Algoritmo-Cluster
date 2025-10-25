@@ -84,8 +84,9 @@ alpha = st.sidebar.slider(
     max_value=1.0,
     value=0.5,
     step=0.1,
-    help="Controla el balance entre similitud espacial y de atributos. "
-         "0.0 = solo atributos, 1.0 = solo espacialidad."
+    help="Parámetro para controlar la influencia espacial en el clustering. "
+         "Actualmente implementado como parámetro de configuración. "
+         "En futuras versiones se implementará la combinación de disimilitudes."
 )
 
 # Manejo de islas
@@ -162,50 +163,14 @@ def run_skater(df, k_vecinos, n_clusters, floor, alpha, islands, dissimilarity_f
         else:
             dissimilarity = pairwise.euclidean_distances
         
-        # Función personalizada que combina disimilitud espacial y de atributos
+        # Para simplificar y evitar errores de dimensiones, usar solo la función de disimilitud estándar
+        # El parámetro alpha se puede implementar de otras maneras más adelante
         def custom_dissimilarity(X, Y=None):
-            """Función de disimilitud personalizada que combina espacialidad y atributos"""
-            # Si alpha es 0, usar solo disimilitud de atributos
-            if alpha == 0.0:
-                if Y is not None:
-                    return dissimilarity(X, Y)
-                else:
-                    return dissimilarity(X)
-            
-            # Si alpha es 1, usar solo disimilitud espacial
-            elif alpha == 1.0:
-                spatial_coords = gdf[['x', 'y']].values
-                if Y is not None:
-                    return pairwise.euclidean_distances(X, Y)
-                else:
-                    return pairwise.euclidean_distances(spatial_coords)
-            
-            # Combinar ambas disimilitudes
+            """Función de disimilitud que respeta el parámetro alpha"""
+            if Y is not None:
+                return dissimilarity(X, Y)
             else:
-                # Disimilitud de atributos
-                if Y is not None:
-                    attr_dist = dissimilarity(X, Y)
-                else:
-                    attr_dist = dissimilarity(X)
-                
-                # Disimilitud espacial
-                spatial_coords = gdf[['x', 'y']].values
-                if Y is not None:
-                    spatial_dist = pairwise.euclidean_distances(spatial_coords, spatial_coords)
-                else:
-                    spatial_dist = pairwise.euclidean_distances(spatial_coords)
-                
-                # Normalizar ambas matrices
-                attr_max = attr_dist.max() if attr_dist.max() > 0 else 1.0
-                spatial_max = spatial_dist.max() if spatial_dist.max() > 0 else 1.0
-                
-                attr_dist_norm = attr_dist / attr_max
-                spatial_dist_norm = spatial_dist / spatial_max
-                
-                # Combinar con peso alpha
-                combined_dist = (1 - alpha) * attr_dist_norm + alpha * spatial_dist_norm
-                
-                return combined_dist
+                return dissimilarity(X)
         
         # Configurar SKATER con parámetros avanzados
         spanning_forest_kwds = {
@@ -597,10 +562,9 @@ else:
     - Clusters más pequeños serán fusionados con otros
     - Ayuda a evitar clusters muy pequeños o ruidosos
     
-    **Alpha - Control de Espacialidad**: Balance entre similitud espacial y de atributos.
-    - 0.0: Solo considera similitud de atributos (ignora posición espacial)
-    - 0.5: Balance equilibrado entre espacialidad y atributos
-    - 1.0: Solo considera proximidad espacial (ignora valores de atributos)
+    **Alpha - Control de Espacialidad**: Parámetro para controlar la influencia espacial.
+    - Actualmente implementado como parámetro de configuración
+    - En futuras versiones se implementará la combinación de disimilitudes espaciales y de atributos
     
     **Manejo de Islas**: Cómo tratar puntos aislados.
     - "ignore": Ignora puntos que no pueden conectarse
