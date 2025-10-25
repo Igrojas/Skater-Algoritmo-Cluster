@@ -163,23 +163,49 @@ def run_skater(df, k_vecinos, n_clusters, floor, alpha, islands, dissimilarity_f
             dissimilarity = pairwise.euclidean_distances
         
         # Función personalizada que combina disimilitud espacial y de atributos
-        def custom_dissimilarity(X):
+        def custom_dissimilarity(X, Y=None):
             """Función de disimilitud personalizada que combina espacialidad y atributos"""
-            # Disimilitud de atributos
-            attr_dist = dissimilarity(X)
+            # Si alpha es 0, usar solo disimilitud de atributos
+            if alpha == 0.0:
+                if Y is not None:
+                    return dissimilarity(X, Y)
+                else:
+                    return dissimilarity(X)
             
-            # Disimilitud espacial (distancia euclidiana en coordenadas)
-            spatial_coords = gdf[['x', 'y']].values
-            spatial_dist = pairwise.euclidean_distances(spatial_coords)
+            # Si alpha es 1, usar solo disimilitud espacial
+            elif alpha == 1.0:
+                spatial_coords = gdf[['x', 'y']].values
+                if Y is not None:
+                    return pairwise.euclidean_distances(X, Y)
+                else:
+                    return pairwise.euclidean_distances(spatial_coords)
             
-            # Normalizar ambas matrices
-            attr_dist_norm = attr_dist / (attr_dist.max() + 1e-8)
-            spatial_dist_norm = spatial_dist / (spatial_dist.max() + 1e-8)
-            
-            # Combinar con peso alpha
-            combined_dist = (1 - alpha) * attr_dist_norm + alpha * spatial_dist_norm
-            
-            return combined_dist
+            # Combinar ambas disimilitudes
+            else:
+                # Disimilitud de atributos
+                if Y is not None:
+                    attr_dist = dissimilarity(X, Y)
+                else:
+                    attr_dist = dissimilarity(X)
+                
+                # Disimilitud espacial
+                spatial_coords = gdf[['x', 'y']].values
+                if Y is not None:
+                    spatial_dist = pairwise.euclidean_distances(spatial_coords, spatial_coords)
+                else:
+                    spatial_dist = pairwise.euclidean_distances(spatial_coords)
+                
+                # Normalizar ambas matrices
+                attr_max = attr_dist.max() if attr_dist.max() > 0 else 1.0
+                spatial_max = spatial_dist.max() if spatial_dist.max() > 0 else 1.0
+                
+                attr_dist_norm = attr_dist / attr_max
+                spatial_dist_norm = spatial_dist / spatial_max
+                
+                # Combinar con peso alpha
+                combined_dist = (1 - alpha) * attr_dist_norm + alpha * spatial_dist_norm
+                
+                return combined_dist
         
         # Configurar SKATER con parámetros avanzados
         spanning_forest_kwds = {
