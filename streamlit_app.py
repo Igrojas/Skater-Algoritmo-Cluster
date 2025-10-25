@@ -77,6 +77,40 @@ floor = st.sidebar.slider(
          "Clusters más pequeños serán fusionados con otros."
 )
 
+# Parámetro Alpha (control de espacialidad)
+alpha = st.sidebar.slider(
+    "**Alpha - Control de Espacialidad**",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.5,
+    step=0.1,
+    help="Controla el balance entre similitud espacial y de atributos. "
+         "0.0 = solo atributos, 1.0 = solo espacialidad."
+)
+
+# Manejo de islas
+islands = st.sidebar.selectbox(
+    "**Manejo de Islas**",
+    options=["ignore", "increase"],
+    index=0,
+    help="Cómo manejar puntos aislados: 'ignore' los ignora, 'increase' aumenta el número de clusters."
+)
+
+# Función de disimilitud
+dissimilarity_func = st.sidebar.selectbox(
+    "**Función de Disimilitud**",
+    options=["euclidean", "manhattan", "cosine"],
+    index=0,
+    help="Métrica para calcular distancias entre puntos."
+)
+
+# Modo de debugging
+trace = st.sidebar.checkbox(
+    "**Modo Debug**",
+    value=False,
+    help="Activa información detallada del proceso de clustering."
+)
+
 # Paleta de colores
 color_palette = st.sidebar.selectbox(
     "**Paleta de Colores**",
@@ -108,8 +142,8 @@ def load_data():
         return None
 
 # Función para ejecutar SKATER
-def run_skater(df, k_vecinos, n_clusters, floor):
-    """Ejecutar algoritmo SKATER"""
+def run_skater(df, k_vecinos, n_clusters, floor, alpha, islands, dissimilarity_func, trace):
+    """Ejecutar algoritmo SKATER con parámetros avanzados"""
     try:
         # Crear geometría de puntos
         geometry = [Point(xy) for xy in zip(df['x'], df['y'])]
@@ -118,23 +152,53 @@ def run_skater(df, k_vecinos, n_clusters, floor):
         # Crear matriz de conectividad espacial
         w = KNN.from_dataframe(gdf, k=k_vecinos)
         
-        # Configurar SKATER
+        # Seleccionar función de disimilitud
+        if dissimilarity_func == "euclidean":
+            dissimilarity = pairwise.euclidean_distances
+        elif dissimilarity_func == "manhattan":
+            dissimilarity = pairwise.manhattan_distances
+        elif dissimilarity_func == "cosine":
+            dissimilarity = pairwise.cosine_distances
+        else:
+            dissimilarity = pairwise.euclidean_distances
+        
+        # Función personalizada que combina disimilitud espacial y de atributos
+        def custom_dissimilarity(X):
+            """Función de disimilitud personalizada que combina espacialidad y atributos"""
+            # Disimilitud de atributos
+            attr_dist = dissimilarity(X)
+            
+            # Disimilitud espacial (distancia euclidiana en coordenadas)
+            spatial_coords = gdf[['x', 'y']].values
+            spatial_dist = pairwise.euclidean_distances(spatial_coords)
+            
+            # Normalizar ambas matrices
+            attr_dist_norm = attr_dist / (attr_dist.max() + 1e-8)
+            spatial_dist_norm = spatial_dist / (spatial_dist.max() + 1e-8)
+            
+            # Combinar con peso alpha
+            combined_dist = (1 - alpha) * attr_dist_norm + alpha * spatial_dist_norm
+            
+            return combined_dist
+        
+        # Configurar SKATER con parámetros avanzados
         spanning_forest_kwds = {
-            'dissimilarity': pairwise.euclidean_distances,
+            'dissimilarity': custom_dissimilarity,
             'affinity': None,
             'reduction': np.sum,
             'center': np.mean,
-            'verbose': 0
+            'verbose': 1 if trace else 0
         }
         
-        # Crear y resolver modelo
+        # Crear y resolver modelo con parámetros adicionales
         model = Skater(
             gdf,
             w,
             ['variable'],
             n_clusters=n_clusters,
             floor=floor,
-            trace=False,
+            trace=trace,
+            islands=islands,
             spanning_forest_kwds=spanning_forest_kwds
         )
         
@@ -399,7 +463,7 @@ if 'run_analysis' in st.session_state and st.session_state.run_analysis:
         progress_bar.progress(60)
         
         # Ejecutar SKATER
-        df_result, model = run_skater(df, k_vecinos, n_clusters, floor)
+        df_result, model = run_skater(df, k_vecinos, n_clusters, floor, alpha, islands, dissimilarity_func, trace)
         
         if df_result is not None:
             progress_bar.progress(100)
@@ -407,6 +471,24 @@ if 'run_analysis' in st.session_state and st.session_state.run_analysis:
             
             # Mostrar estadísticas básicas
             st.header("📊 Resultados del Análisis")
+            
+            # Información de parámetros utilizados
+            st.subheader("⚙️ Parámetros Utilizados")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("K Vecinos", k_vecinos)
+                st.metric("Alpha", f"{alpha:.1f}")
+            with col2:
+                st.metric("Clusters Deseados", n_clusters)
+                st.metric("Tamaño Mínimo", floor)
+            with col3:
+                st.metric("Función Disimilitud", dissimilarity_func.title())
+                st.metric("Manejo Islas", islands.title())
+            with col4:
+                st.metric("Modo Debug", "Sí" if trace else "No")
+                st.metric("Paleta Colores", color_palette.title())
+            
+            st.divider()
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -488,6 +570,23 @@ else:
     **Tamaño Mínimo por Cluster**: Número mínimo de puntos por cluster.
     - Clusters más pequeños serán fusionados con otros
     - Ayuda a evitar clusters muy pequeños o ruidosos
+    
+    **Alpha - Control de Espacialidad**: Balance entre similitud espacial y de atributos.
+    - 0.0: Solo considera similitud de atributos (ignora posición espacial)
+    - 0.5: Balance equilibrado entre espacialidad y atributos
+    - 1.0: Solo considera proximidad espacial (ignora valores de atributos)
+    
+    **Manejo de Islas**: Cómo tratar puntos aislados.
+    - "ignore": Ignora puntos que no pueden conectarse
+    - "increase": Aumenta el número de clusters para incluir puntos aislados
+    
+    **Función de Disimilitud**: Métrica para calcular distancias.
+    - "euclidean": Distancia euclidiana estándar
+    - "manhattan": Distancia de Manhattan (suma de diferencias absolutas)
+    - "cosine": Distancia coseno (útil para datos normalizados)
+    
+    **Modo Debug**: Activa información detallada del proceso.
+    - Útil para entender cómo funciona el algoritmo internamente
     
     ### 📊 Visualizaciones Incluidas:
     - **Proyecciones 2D**: Vistas XY, XZ, YZ de los clusters
