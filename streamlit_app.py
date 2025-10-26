@@ -1,6 +1,6 @@
 """
-SKATER - Análisis de Clustering Espacial para Datos Geológicos
-Aplicación Streamlit para análisis interactivo
+Clustering Espacial - Análisis de Datos Geológicos
+Aplicación Streamlit para análisis interactivo con SKATER y K-Means
 """
 
 import streamlit as st
@@ -14,25 +14,34 @@ from shapely.geometry import Point
 from libpysal.weights import KNN
 from spopt.region import Skater
 from sklearn.metrics import pairwise
+from sklearn.cluster import KMeans
 from scipy import stats
 import warnings
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 
+# Intentar importar skfuzzy, si no está disponible, implementaremos nuestra propia versión
+try:
+    import skfuzzy as fuzz
+    SKFUZZY_AVAILABLE = True
+except ImportError:
+    SKFUZZY_AVAILABLE = False
+    st.warning("⚠️ scikit-fuzzy no está instalado. Se usará una implementación básica de Fuzzy C-Means.")
+
 warnings.filterwarnings('ignore')
 
 # Configuración de la página
 st.set_page_config(
-    page_title="SKATER - Clustering Espacial",
+    page_title="Clustering Espacial",
     page_icon="🗺️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Título principal
-st.title("🗺️ SKATER - Análisis de Clustering Espacial")
-st.markdown("**Análisis de clustering espacial para datos geológicos usando el algoritmo SKATER**")
+st.title("🗺️ Análisis de Clustering Espacial")
+st.markdown("**Análisis de clustering espacial para datos geológicos usando SKATER y K-Means**")
 
 # Sidebar para parámetros
 st.sidebar.header("⚙️ Configuración de Parámetros")
@@ -116,84 +125,225 @@ st.session_state.prev_variable_name = variable
 # Parámetros configurables
 st.sidebar.markdown("### 🔧 Parámetros del Algoritmo")
 
-# K vecinos
-k_vecinos = st.sidebar.slider(
-    "**K Vecinos**",
-    min_value=5,
-    max_value=200,
-    value=90,
-    step=5,
-    help="Número de vecinos más cercanos para crear la matriz de conectividad espacial. "
-         "Valores más altos crean conexiones más densas entre puntos cercanos."
+# Selector de algoritmo PRIMERO
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎯 Selección de Algoritmo")
+algorithm = st.sidebar.radio(
+    "**Algoritmo de Clustering**",
+    options=["SKATER", "K-Means", "Fuzzy C-Means"],
+    index=0,
+    help="Selecciona el algoritmo de clustering a utilizar"
 )
+st.sidebar.markdown("---")
 
-# Número de clusters
+# Parámetros comunes
+st.sidebar.markdown("### ⚙️ Parámetros Comunes")
+
+# Número de clusters (común a ambos algoritmos)
 n_clusters = st.sidebar.slider(
     "**Número de Clusters**",
     min_value=2,
     max_value=10,
     value=3,
     step=1,
-    help="Número deseado de clusters para dividir los datos. "
-         "El algoritmo intentará crear esta cantidad de grupos espacialmente coherentes."
+    help="Número deseado de clusters para dividir los datos"
 )
 
-# Floor (tamaño mínimo)
-floor = st.sidebar.slider(
-    "**Tamaño Mínimo por Cluster**",
-    min_value=10,
-    max_value=500,
-    value=150,
-    step=10,
-    help="Número mínimo de puntos que debe tener cada cluster. "
-         "Clusters más pequeños serán fusionados con otros."
-)
-
-# Parámetro Alpha (control de espacialidad)
-alpha = st.sidebar.slider(
-    "**Alpha - Control de Espacialidad**",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.5,
-    step=0.1,
-    help="Controla el balance entre similitud espacial y de atributos. "
-         "0.0 = solo atributos, 0.5 = balance equilibrado, 1.0 = solo espacialidad."
-)
-
-# Manejo de islas
-islands = st.sidebar.selectbox(
-    "**Manejo de Islas**",
-    options=["ignore", "increase"],
-    index=0,
-    help="Cómo manejar puntos aislados: 'ignore' los ignora, 'increase' aumenta el número de clusters."
-)
-
-# Función de disimilitud
-dissimilarity_func = st.sidebar.selectbox(
-    "**Función de Disimilitud**",
-    options=["euclidean", "manhattan", "cosine"],
-    index=0,
-    help="Métrica para calcular distancias entre puntos."
-)
-
-# Modo de debugging
-trace = st.sidebar.checkbox(
-    "**Modo Debug**",
-    value=False,
-    help="Activa información detallada del proceso de clustering."
-)
-
-# Paleta de colores
+# Paleta de colores (común)
 color_palette = st.sidebar.selectbox(
     "**Paleta de Colores**",
     options=["dark", "deep", "muted", "bright", "pastel", "colorblind"],
     index=0,
-    help="Paleta de colores para visualizar los diferentes clusters."
+    help="Paleta de colores para visualizar los diferentes clusters"
 )
 
+# Parámetros específicos según el algoritmo
+if algorithm == "SKATER":
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⚙️ Parámetros SKATER")
+    
+    # K vecinos
+    k_vecinos = st.sidebar.slider(
+        "**K Vecinos**",
+        min_value=5,
+        max_value=200,
+        value=90,
+        step=5,
+        help="Número de vecinos más cercanos para crear la matriz de conectividad espacial"
+    )
+    
+    # Floor (tamaño mínimo)
+    floor = st.sidebar.slider(
+        "**Tamaño Mínimo por Cluster**",
+        min_value=10,
+        max_value=500,
+        value=150,
+        step=10,
+        help="Número mínimo de puntos que debe tener cada cluster"
+    )
+    
+    # Parámetro Alpha (control de espacialidad)
+    alpha = st.sidebar.slider(
+        "**Alpha - Control de Espacialidad**",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.5,
+        step=0.1,
+        help="Balance entre similitud espacial y de atributos"
+    )
+    
+    # Manejo de islas
+    islands = st.sidebar.selectbox(
+        "**Manejo de Islas**",
+        options=["ignore", "increase"],
+        index=0,
+        help="Cómo manejar puntos aislados"
+    )
+    
+    # Función de disimilitud
+    dissimilarity_func = st.sidebar.selectbox(
+        "**Función de Disimilitud**",
+        options=["euclidean", "manhattan", "cosine"],
+        index=0,
+        help="Métrica para calcular distancias entre puntos"
+    )
+    
+    # Modo de debugging
+    trace = st.sidebar.checkbox(
+        "**Modo Debug**",
+        value=False,
+        help="Activa información detallada del proceso de clustering"
+    )
+    
+    # Valores por defecto para otros algoritmos
+    include_spatial = False
+    normalize_features = True
+    init_method = "k-means++"
+    n_init = 10
+    fuzziness = 2.0
+    max_iter = 300
+    error = 0.005
+
+elif algorithm == "K-Means":
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⚙️ Parámetros K-Means")
+    
+    include_spatial = st.sidebar.checkbox(
+        "**Incluir Coordenadas Espaciales**",
+        value=False,
+        help="Si está marcado, usar coordenadas X,Y,Z además del atributo"
+    )
+    
+    normalize_features = st.sidebar.checkbox(
+        "**Normalizar Variables**",
+        value=True,
+        help="Normalizar las variables para mismo peso en clustering"
+    )
+    
+    init_method = st.sidebar.selectbox(
+        "**Método de Inicialización**",
+        options=["k-means++", "random"],
+        index=0,
+        help="Método para inicializar los centroides"
+    )
+    
+    n_init = st.sidebar.slider(
+        "**Inicializaciones**",
+        min_value=1,
+        max_value=20,
+        value=10,
+        help="Número de veces que se ejecutará con diferentes semillas"
+    )
+    
+    # Valores por defecto para otros algoritmos
+    k_vecinos = 90
+    floor = 150
+    alpha = 0.5
+    islands = "ignore"
+    dissimilarity_func = "euclidean"
+    trace = False
+    
+else:  # Fuzzy C-Means
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⚙️ Parámetros Fuzzy C-Means")
+    
+    fuzziness = st.sidebar.slider(
+        "**Parámetro de Difusidad (m)**",
+        min_value=1.1,
+        max_value=3.0,
+        value=2.0,
+        step=0.1,
+        help="Controla el nivel de difusidad de la pertenencia (1.1 = muy difuso, 3.0 = menos difuso)"
+    )
+    
+    include_spatial = st.sidebar.checkbox(
+        "**Incluir Coordenadas Espaciales**",
+        value=False,
+        help="Si está marcado, usar coordenadas X,Y,Z además del atributo"
+    )
+    
+    normalize_features = st.sidebar.checkbox(
+        "**Normalizar Variables**",
+        value=True,
+        help="Normalizar las variables para mismo peso en clustering"
+    )
+    
+    max_iter = st.sidebar.slider(
+        "**Iteraciones Máximas**",
+        min_value=50,
+        max_value=500,
+        value=300,
+        step=50,
+        help="Número máximo de iteraciones para convergencia"
+    )
+    
+    error = st.sidebar.slider(
+        "**Tolerancia de Convergencia**",
+        min_value=0.0001,
+        max_value=0.1,
+        value=0.005,
+        step=0.0001,
+        format="%.4f",
+        help="Condición de parada: diferencia mínima entre iteraciones"
+    )
+    
+    # Valores por defecto para otros algoritmos
+    k_vecinos = 90
+    floor = 150
+    alpha = 0.5
+    islands = "ignore"
+    dissimilarity_func = "euclidean"
+    trace = False
+    init_method = "k-means++"
+    n_init = 10
+
 # Botón para ejecutar análisis
-if st.sidebar.button("🚀 Ejecutar Análisis SKATER", type="primary"):
+st.sidebar.markdown("---")
+if st.sidebar.button(f"🚀 Ejecutar Análisis {algorithm}", type="primary"):
     st.session_state.run_analysis = True
+    
+    # Determinar algoritmo y guardar parámetros
+    if algorithm == "SKATER":
+        st.session_state.algorithm = "SKATER"
+        st.session_state.k_vecinos = k_vecinos
+        st.session_state.floor = floor
+        st.session_state.alpha = alpha
+        st.session_state.islands = islands
+        st.session_state.dissimilarity_func = dissimilarity_func
+        st.session_state.trace = trace
+    elif algorithm == "K-Means":
+        st.session_state.algorithm = "KMeans"
+        st.session_state.include_spatial = include_spatial
+        st.session_state.normalize_features = normalize_features
+        st.session_state.init_method = init_method
+        st.session_state.n_init = n_init
+    else:  # Fuzzy C-Means
+        st.session_state.algorithm = "FuzzyCMeans"
+        st.session_state.include_spatial = include_spatial
+        st.session_state.normalize_features = normalize_features
+        st.session_state.fuzziness = fuzziness
+        st.session_state.max_iter = max_iter
+        st.session_state.error = error
 
 # Función para cargar datos
 @st.cache_data
@@ -366,6 +516,177 @@ def run_skater(df, k_vecinos, n_clusters, floor, alpha, islands, dissimilarity_f
         
     except Exception as e:
         st.error(f"Error en SKATER: {e}")
+        return None, None
+
+# Función para ejecutar K-Means
+def run_kmeans(df, n_clusters, include_spatial, normalize_features, init_method, n_init):
+    """Ejecutar algoritmo K-Means
+    
+    Args:
+        df: DataFrame con columnas x, y, z, variable
+        n_clusters: Número de clusters deseados
+        include_spatial: Si True, incluye coordenadas espaciales en el clustering
+        normalize_features: Si True, normaliza las características
+        init_method: Método de inicialización ('k-means++' o 'random')
+        n_init: Número de inicializaciones
+        
+    Returns:
+        DataFrame con columna 'cluster' agregada
+    """
+    try:
+        from sklearn.preprocessing import StandardScaler
+        
+        # Preparar características para clustering
+        if include_spatial:
+            # Incluir coordenadas espaciales y variable
+            features = df[['x', 'y', 'z', 'variable']].values
+        else:
+            # Solo usar la variable
+            features = df[['variable']].values
+        
+        # Normalizar si es necesario
+        if normalize_features:
+            scaler = StandardScaler()
+            features = scaler.fit_transform(features)
+        
+        # Aplicar K-Means
+        kmeans = KMeans(
+            n_clusters=n_clusters,
+            init=init_method,
+            n_init=n_init,
+            random_state=42
+        )
+        
+        clusters = kmeans.fit_predict(features)
+        
+        # Agregar clusters al dataframe
+        df['cluster'] = clusters
+        
+        # Calcular inercia (sum of squared distances to centroids)
+        inertia = kmeans.inertia_
+        
+        # Guardar el modelo
+        model = {'kmeans': kmeans, 'scaler': scaler if normalize_features else None, 'inertia': inertia}
+        
+        return df, model
+        
+    except Exception as e:
+        st.error(f"Error en K-Means: {e}")
+        return None, None
+
+# Función para ejecutar Fuzzy C-Means
+def run_fuzzy_cmeans(df, n_clusters, fuzziness, include_spatial, normalize_features, max_iter, error):
+    """Ejecutar algoritmo Fuzzy C-Means
+    
+    Args:
+        df: DataFrame con columnas x, y, z, variable
+        n_clusters: Número de clusters deseados
+        fuzziness: Parámetro de difusidad (m)
+        include_spatial: Si True, incluye coordenadas espaciales en el clustering
+        normalize_features: Si True, normaliza las características
+        max_iter: Número máximo de iteraciones
+        error: Tolerancia de convergencia
+        
+    Returns:
+        DataFrame con columna 'cluster' agregada y matriz de pertenencia
+    """
+    try:
+        from sklearn.preprocessing import StandardScaler
+        
+        # Preparar características para clustering
+        if include_spatial:
+            features = df[['x', 'y', 'z', 'variable']].values
+        else:
+            features = df[['variable']].values
+        
+        # Normalizar si es necesario
+        scaler = None
+        if normalize_features:
+            scaler = StandardScaler()
+            features = scaler.fit_transform(features)
+        
+        if SKFUZZY_AVAILABLE:
+            # Usar skfuzzy si está disponible
+            cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
+                features.T,
+                n_clusters,
+                fuzziness,
+                error=error,
+                maxiter=max_iter,
+                init=None
+            )
+            
+            # Asignar cluster al punto más probable
+            cluster_assignments = np.argmax(u, axis=0)
+            df['cluster'] = cluster_assignments
+            
+            # Guardar información adicional
+            model = {
+                'centers': cntr,
+                'membership': u,
+                'fpc': fpc,
+                'scaler': scaler,
+                'n_iterations': p,
+                'inertia': jm[-1] if len(jm) > 0 else None
+            }
+        else:
+            # Implementación básica de Fuzzy C-Means
+            n_samples, n_features = features.shape
+            
+            # Inicializar matriz de pertenencia aleatoriamente
+            np.random.seed(42)
+            membership = np.random.random((n_clusters, n_samples))
+            membership = membership / membership.sum(axis=0)
+            
+            # Calcular centroides iniciales
+            centers = np.dot(membership ** fuzziness, features)
+            centers = centers / (membership ** fuzziness).sum(axis=1)[:, np.newaxis]
+            
+            # Iterar hasta convergencia
+            for iteration in range(max_iter):
+                # Calcular distancias
+                distances = np.zeros((n_clusters, n_samples))
+                for i in range(n_clusters):
+                    distances[i] = np.linalg.norm(features - centers[i], axis=1) ** 2
+                
+                # Actualizar matriz de pertenencia
+                new_membership = np.zeros((n_clusters, n_samples))
+                for j in range(n_samples):
+                    for i in range(n_clusters):
+                        sum_term = 0
+                        for k in range(n_clusters):
+                            sum_term += (distances[i, j] / distances[k, j]) ** (2 / (fuzziness - 1))
+                        new_membership[i, j] = 1.0 / sum_term if distances[i, j] > 0 else 1.0
+                
+                # Actualizar centros
+                centers = np.dot(new_membership ** fuzziness, features)
+                centers = centers / (new_membership ** fuzziness).sum(axis=1)[:, np.newaxis]
+                
+                # Verificar convergencia
+                diff = np.abs(new_membership - membership).max()
+                membership = new_membership
+                
+                if diff < error:
+                    break
+            
+            # Asignar cluster al punto más probable
+            cluster_assignments = np.argmax(membership, axis=0)
+            df['cluster'] = cluster_assignments
+            
+            # Guardar información adicional
+            model = {
+                'centers': centers,
+                'membership': membership,
+                'fpc': None,  # Fuzzy partition coefficient
+                'scaler': scaler,
+                'n_iterations': iteration + 1,
+                'inertia': distances.max()
+            }
+        
+        return df, model
+        
+    except Exception as e:
+        st.error(f"Error en Fuzzy C-Means: {e}")
         return None, None
 
 # Función para crear gráficas 2D
@@ -624,11 +945,63 @@ if 'run_analysis' in st.session_state and st.session_state.run_analysis:
     df = load_data(data_file, variable_name)
     
     if df is not None:
-        status_text.text("Ejecutando SKATER...")
-        progress_bar.progress(60)
+        # Determinar algoritmo a usar
+        current_algorithm = st.session_state.get('algorithm', 'SKATER')
         
-        # Ejecutar SKATER
-        df_result, model = run_skater(df, k_vecinos, n_clusters, floor, alpha, islands, dissimilarity_func, trace)
+        # Inicializar variables para todos los algoritmos
+        k_vec, fl, alp, isl, dissim, tr = None, None, None, None, None, None
+        include_spatial, normalize_features, init_method, n_init = None, None, None, None
+        fuzziness, max_iter, error = None, None, None
+        
+        if current_algorithm == 'SKATER':
+            status_text.text("Ejecutando SKATER...")
+            progress_bar.progress(60)
+            
+            # Obtener parámetros de SKATER desde session_state
+            k_vec = st.session_state.get('k_vecinos', 90)
+            fl = st.session_state.get('floor', 150)
+            alp = st.session_state.get('alpha', 0.5)
+            isl = st.session_state.get('islands', 'ignore')
+            dissim = st.session_state.get('dissimilarity_func', 'euclidean')
+            tr = st.session_state.get('trace', False)
+            
+            # Ejecutar SKATER
+            df_result, model = run_skater(df, k_vec, n_clusters, fl, alp, isl, dissim, tr)
+            algorithm_name = "SKATER"
+            
+        elif current_algorithm == 'KMeans':
+            status_text.text("Ejecutando K-Means...")
+            progress_bar.progress(60)
+            
+            # Obtener parámetros de K-Means
+            include_spatial = st.session_state.get('include_spatial', False)
+            normalize_features = st.session_state.get('normalize_features', True)
+            init_method = st.session_state.get('init_method', 'k-means++')
+            n_init = st.session_state.get('n_init', 10)
+            
+            # Ejecutar K-Means
+            df_result, model = run_kmeans(df, n_clusters, include_spatial, normalize_features, init_method, n_init)
+            algorithm_name = "K-Means"
+            
+        elif current_algorithm == 'FuzzyCMeans':
+            status_text.text("Ejecutando Fuzzy C-Means...")
+            progress_bar.progress(60)
+            
+            # Obtener parámetros de Fuzzy C-Means
+            include_spatial = st.session_state.get('include_spatial', False)
+            normalize_features = st.session_state.get('normalize_features', True)
+            fuzziness = st.session_state.get('fuzziness', 2.0)
+            max_iter = st.session_state.get('max_iter', 300)
+            error = st.session_state.get('error', 0.005)
+            
+            # Ejecutar Fuzzy C-Means
+            df_result, model = run_fuzzy_cmeans(df, n_clusters, fuzziness, include_spatial, normalize_features, max_iter, error)
+            algorithm_name = "Fuzzy C-Means"
+            
+        else:
+            st.error(f"Algoritmo desconocido: {current_algorithm}")
+            df_result, model = None, None
+            algorithm_name = "Desconocido"
         
         if df_result is not None:
             progress_bar.progress(100)
@@ -648,19 +1021,50 @@ if 'run_analysis' in st.session_state and st.session_state.run_analysis:
             
             # Información de parámetros utilizados
             st.subheader("⚙️ Parámetros Utilizados")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("K Vecinos", k_vecinos)
-                st.metric("Alpha", f"{alpha:.1f}")
-            with col2:
-                st.metric("Clusters Deseados", n_clusters)
-                st.metric("Tamaño Mínimo", floor)
-            with col3:
-                st.metric("Función Disimilitud", dissimilarity_func.title())
-                st.metric("Manejo Islas", islands.title())
-            with col4:
-                st.metric("Modo Debug", "Sí" if trace else "No")
-                st.metric("Paleta Colores", color_palette.title())
+            
+            if algorithm_name == "SKATER":
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("K Vecinos", k_vec)
+                    st.metric("Alpha", f"{alp:.1f}")
+                with col2:
+                    st.metric("Clusters Deseados", n_clusters)
+                    st.metric("Tamaño Mínimo", fl)
+                with col3:
+                    st.metric("Función Disimilitud", dissim.title())
+                    st.metric("Manejo Islas", isl.title())
+                with col4:
+                    st.metric("Modo Debug", "Sí" if tr else "No")
+                    st.metric("Paleta Colores", color_palette.title())
+            elif algorithm_name == "K-Means":
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Clusters", n_clusters)
+                    st.metric("Inercia", f"{model['inertia']:.2f}")
+                with col2:
+                    st.metric("Espacial", "Sí" if include_spatial else "No")
+                    st.metric("Normalizado", "Sí" if normalize_features else "No")
+                with col3:
+                    st.metric("Inicialización", init_method)
+                    st.metric("N Inicializaciones", n_init)
+                with col4:
+                    st.metric("Algoritmo", algorithm_name)
+                    st.metric("Paleta Colores", color_palette.title())
+                    
+            else:  # Fuzzy C-Means
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Clusters", n_clusters)
+                    st.metric("Difusidad (m)", f"{fuzziness:.2f}")
+                with col2:
+                    st.metric("Espacial", "Sí" if include_spatial else "No")
+                    st.metric("Normalizado", "Sí" if normalize_features else "No")
+                with col3:
+                    st.metric("Iteraciones", model.get('n_iterations', 'N/A'))
+                    st.metric("Tolerancia", f"{error:.4f}")
+                with col4:
+                    st.metric("Algoritmo", algorithm_name)
+                    st.metric("FPC", f"{model.get('fpc', 'N/A'):.3f}" if model.get('fpc') is not None else "N/A")
             
             st.divider()
             
@@ -714,22 +1118,27 @@ if 'run_analysis' in st.session_state and st.session_state.run_analysis:
             st.session_state.run_analysis = False
             
         else:
-            st.error("Error al ejecutar el análisis SKATER")
+            st.error(f"Error al ejecutar el análisis {algorithm_name}")
     else:
         st.error("Error al cargar los datos")
 
 else:
     # Página de inicio
     st.markdown("""
-    ## 🎯 Bienvenido al Análisis SKATER
+    ## 🎯 Bienvenido al Análisis de Clustering Espacial
     
-    Esta aplicación permite realizar análisis de clustering espacial usando el algoritmo SKATER 
-    (Spatial 'K'luster Analysis by Tree Edge Removal) sobre datos geológicos.
+    Esta aplicación permite realizar análisis de clustering espacial usando tres algoritmos:
+    
+    - **SKATER** (Spatial 'K'luster Analysis by Tree Edge Removal) - Clustering espacial basado en conectividad
+    - **K-Means** - Clustering basado en similitud de atributos, con opción de incluir coordenadas
+    - **Fuzzy C-Means** - Clustering difuso que permite pertenencia parcial a múltiples clusters
     
     ### 📋 Instrucciones:
-    1. **Configura los parámetros** en la barra lateral
-    2. **Haz clic en "Ejecutar Análisis SKATER"** para procesar los datos
-    3. **Explora los resultados** en las diferentes secciones
+    1. **Selecciona el archivo y variable** en la barra lateral
+    2. **Elige el algoritmo** (SKATER, K-Means o Fuzzy C-Means)
+    3. **Configura los parámetros** según el algoritmo seleccionado
+    4. **Haz clic en "Ejecutar Análisis"** para procesar los datos
+    5. **Explora los resultados** en las diferentes secciones
     
     ### 🔧 Parámetros Explicados:
     
@@ -761,6 +1170,35 @@ else:
     
     **Modo Debug**: Activa información detallada del proceso.
     - Útil para entender cómo funciona el algoritmo internamente
+    
+    ### 🔧 Parámetros K-Means:
+    
+    **Incluir Coordenadas Espaciales**: Si está marcado, el clustering considera las coordenadas X, Y, Z además del valor del atributo.
+    - Marcado: Crea clusters espacialmente coherentes
+    - Desmarcado: Clustering basado solo en valores del atributo
+    
+    **Normalizar Variables**: Normaliza las características para que tengan el mismo peso.
+    - Importante cuando se incluyen coordenadas, ya que estas pueden tener diferentes escalas
+    
+    **Método de Inicialización**: 
+    - "k-means++": Inicialización inteligente (recomendado)
+    - "random": Inicialización aleatoria
+    
+    **Número de Inicializaciones**: Cuántas veces se ejecutará el algoritmo con diferentes semillas.
+    - Mayor número = mejor resultado, pero más tiempo de ejecución
+    
+    ### 🔧 Parámetros Fuzzy C-Means:
+    
+    **Parámetro de Difusidad (m)**: Controla el grado de difusidad en la pertenencia a clusters.
+    - Valores bajos (1.1-1.5): Muy difuso, alta incertidumbre en las fronteras
+    - Valores medios (2.0): Balance entre difusidad y precisión
+    - Valores altos (2.5-3.0): Menos difuso, clusters más definidos
+    
+    **Incluir Coordenadas Espaciales**: Si está marcado, el clustering considera las coordenadas X, Y, Z además del valor del atributo.
+    
+    **Iteraciones Máximas**: Número máximo de iteraciones antes de detener el algoritmo.
+    
+    **Tolerancia de Convergencia**: Criterio de parada cuando el cambio entre iteraciones es menor que este valor.
     
     ### 📊 Visualizaciones Incluidas:
     - **Proyecciones 2D**: Vistas XY, XZ, YZ de los clusters
