@@ -59,11 +59,10 @@ print("="*70)
 # Cargar el Excel
 df = pd.read_excel(archivo_excel, sheet_name=hoja)
 
-
 print(f"\n✓ Archivo cargado: {len(df)} filas")
 print(f"  Columnas disponibles: {df.columns.tolist()}")
 
-df = df[df['midy'] < 25500]
+# df = df[df['midy'] < 25500]
 # Verificar que las columnas existen
 columnas_necesarias = [columna_x, columna_y, columna_z, columna_variable]
 columnas_faltantes = [col for col in columnas_necesarias if col not in df.columns]

@@ -38,8 +38,80 @@ st.markdown("**Análisis de clustering espacial para datos geológicos usando el
 st.sidebar.header("⚙️ Configuración de Parámetros")
 
 # Información sobre el archivo
-st.sidebar.markdown("### 📁 Archivo de Datos")
-st.sidebar.info("Archivo: `data/1_recpeso.xlsx`\nHoja: `recpeso`")
+st.sidebar.markdown("### 📁 Configuración de Datos")
+
+# Selector de archivo de datos
+selected_file = st.sidebar.selectbox(
+    "**Archivo de Datos**",
+    options=["bd_Parametros cineticos_hom.csv", "1_recpeso.xlsx"],
+    index=0,
+    help="Selecciona el archivo de datos a analizar"
+)
+
+# Inicializar variables de datos en session_state
+if 'selected_variable' not in st.session_state:
+    st.session_state.selected_variable = None
+
+# Intentar cargar preview de columnas según el archivo seleccionado
+if selected_file == "bd_Parametros cineticos_hom.csv":
+    try:
+        df_preview = pd.read_csv('data/bd_Parametros cineticos_hom.csv', sep=';', encoding='latin-1', nrows=0)
+        # Excluir columnas de coordenadas y metadatos
+        available_vars = [col for col in df_preview.columns if col not in ['midx', 'midy', 'midz', 'compid', 'composito', 'holeid', 'SampleID', 'Campana']]
+        if st.session_state.selected_variable not in available_vars:
+            st.session_state.selected_variable = available_vars[0] if available_vars else None
+        
+        variable = st.sidebar.selectbox(
+            "**Variable para Clustering**",
+            options=available_vars,
+            index=available_vars.index(st.session_state.selected_variable) if st.session_state.selected_variable in available_vars else 0,
+            help="Selecciona la variable que se usará para el clustering"
+        )
+        st.session_state.selected_variable = variable
+    except Exception as e:
+        st.sidebar.error(f"Error al cargar columnas: {e}")
+        variable = None
+
+elif selected_file == "1_recpeso.xlsx":
+    try:
+        df_preview = pd.read_excel('data/1_recpeso.xlsx', sheet_name='recpeso', nrows=0)
+        # Excluir columnas de coordenadas y metadatos
+        available_vars = [col for col in df_preview.columns if col not in ['midx', 'midy', 'midz', 'compid']]
+        if st.session_state.selected_variable not in available_vars:
+            st.session_state.selected_variable = available_vars[0] if available_vars else None
+        
+        variable = st.sidebar.selectbox(
+            "**Variable para Clustering**",
+            options=available_vars,
+            index=available_vars.index(st.session_state.selected_variable) if st.session_state.selected_variable in available_vars else 0,
+            help="Selecciona la variable que se usará para el clustering"
+        )
+        st.session_state.selected_variable = variable
+    except Exception as e:
+        st.sidebar.error(f"Error al cargar columnas: {e}")
+        variable = None
+
+else:
+    variable = None
+
+# Guardar estado actual
+prev_data_file = st.session_state.get('prev_data_file', None)
+prev_variable_name = st.session_state.get('prev_variable_name', None)
+
+st.session_state.data_file = selected_file
+st.session_state.variable_name = variable
+
+# Marcar que hay cambios si el archivo o variable cambió
+if prev_data_file is not None:
+    if prev_data_file != selected_file or prev_variable_name != variable:
+        st.session_state.data_changed = True
+    else:
+        st.session_state.data_changed = False
+else:
+    st.session_state.data_changed = False
+
+st.session_state.prev_data_file = selected_file
+st.session_state.prev_variable_name = variable
 
 # Parámetros configurables
 st.sidebar.markdown("### 🔧 Parámetros del Algoritmo")
@@ -125,19 +197,61 @@ if st.sidebar.button("🚀 Ejecutar Análisis SKATER", type="primary"):
 
 # Función para cargar datos
 @st.cache_data
-def load_data():
-    """Cargar datos desde Excel"""
+def load_data(data_file: str, variable_name: str):
+    """Cargar datos desde archivo seleccionado
+    
+    Args:
+        data_file: Nombre del archivo a cargar
+        variable_name: Nombre de la variable a usar para clustering
+    
+    Returns:
+        DataFrame con columnas x, y, z, variable
+    """
+    # Esta función se cacheará automáticamente por Streamlit
+    # El cache se limpiará cuando cambien los parámetros
     try:
-        df = pd.read_excel('data/1_recpeso.xlsx', sheet_name='recpeso')
-        df = df[df['midy'] < 25500]  # Filtro del código original
+        # Cargar según el tipo de archivo
+        if data_file == "bd_Parametros cineticos_hom.csv":
+            df = pd.read_csv('data/bd_Parametros cineticos_hom.csv',
+                            sep=';',
+                            encoding='latin-1')
+            
+            # Verificar que la variable existe
+            if variable_name not in df.columns:
+                st.error(f"La variable '{variable_name}' no existe en el archivo")
+                return None
+                
+        elif data_file == "1_recpeso.xlsx":
+            df = pd.read_excel('data/1_recpeso.xlsx', sheet_name='recpeso')
+            
+            # Verificar que la variable existe
+            if variable_name not in df.columns:
+                st.error(f"La variable '{variable_name}' no existe en el archivo")
+                return None
+        else:
+            st.error(f"Archivo '{data_file}' no reconocido")
+            return None
         
-        # Seleccionar y renombrar columnas
-        df = df[['midx', 'midy', 'midz', 'recpe']].copy()
+        # Verificar que las columnas de coordenadas existen
+        coord_cols = ['midx', 'midy', 'midz']
+        if not all(col in df.columns for col in coord_cols):
+            st.error("El archivo no contiene las columnas de coordenadas (midx, midy, midz)")
+            return None
+        
+        # Seleccionar columnas necesarias
+        df = df[coord_cols + [variable_name]].copy()
         df.columns = ['x', 'y', 'z', 'variable']
+        
+        # Eliminar filas con valores faltantes
         df = df.dropna()
         
+        # Verificar que hay datos
+        if len(df) == 0:
+            st.warning("No hay datos válidos después de aplicar filtros")
+            return None
         
         return df
+        
     except Exception as e:
         st.error(f"Error al cargar datos: {e}")
         return None
@@ -497,7 +611,17 @@ if 'run_analysis' in st.session_state and st.session_state.run_analysis:
     # Cargar datos
     status_text.text("Cargando datos...")
     progress_bar.progress(20)
-    df = load_data()
+    
+    # Obtener parámetros de configuración
+    data_file = st.session_state.get('data_file', 'bd_Parametros cineticos_hom.csv')
+    variable_name = st.session_state.get('variable_name', None)
+    
+    if variable_name is None:
+        st.error("Por favor, selecciona una variable para el clustering")
+        st.session_state.run_analysis = False
+        st.stop()
+    
+    df = load_data(data_file, variable_name)
     
     if df is not None:
         status_text.text("Ejecutando SKATER...")
@@ -512,6 +636,15 @@ if 'run_analysis' in st.session_state and st.session_state.run_analysis:
             
             # Mostrar estadísticas básicas
             st.header("📊 Resultados del Análisis")
+            
+            # Información de datos utilizados
+            st.subheader("📁 Datos Analizados")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Archivo", st.session_state.get('data_file', 'N/A'))
+            with col2:
+                st.metric("Variable", st.session_state.get('variable_name', 'N/A'))
+            st.divider()
             
             # Información de parámetros utilizados
             st.subheader("⚙️ Parámetros Utilizados")
@@ -638,12 +771,19 @@ else:
     ¡Comienza configurando los parámetros y ejecutando el análisis!
     """)
     
-    # Mostrar información del dataset
+    # Mostrar información del dataset seleccionado
     st.subheader("📁 Información del Dataset")
-    st.info("""
-    **Archivo**: `data/1_recpeso.xlsx`  
-    **Hoja**: `recpeso`  
-    **Columnas**: 
-    - `midx`, `midy`, `midz`: Coordenadas espaciales
-    - `recpe`: Variable a analizar (recuperación de peso)
-    """)
+    
+    data_file = st.session_state.get('data_file', 'bd_Parametros cineticos_hom.csv')
+    variable_name = st.session_state.get('variable_name', None)
+    
+    info_text = f"""
+    **Archivo**: `data/{data_file}`
+    **Variable**: `{variable_name}` (seleccionada para clustering)
+    
+    **Coordenadas**:
+    - `midx`, `midy`, `midz`: Coordenadas espaciales (utilizadas para la conectividad)
+    
+    💡 **Nota**: Puedes cambiar el archivo y la variable en el menú lateral antes de ejecutar el análisis.
+    """
+    st.info(info_text)
